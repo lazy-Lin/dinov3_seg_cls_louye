@@ -1,0 +1,95 @@
+# 瑕疵检测模型配置文件
+
+# 数据配置
+data:
+  data_root: "data/defect_dataset"
+  image_size: 518
+  batch_size: 32
+  num_workers: 4
+  val_split: 0.2
+
+# 模型配置
+model:
+  backbone: "dinov3_vits14"  # dinov3_vits14, dinov3_vitb14, dinov3_vitl14
+  embed_dim: 384  # vits14: 384, vitb14: 768, vitl14: 1024
+  num_classes: 2
+  seg_channels: 1
+  dropout: 0.2
+  freeze_backbone: false
+
+# 训练配置
+training:
+  epochs: 100
+  lr: 1e-4
+  weight_decay: 0.05
+  warmup_epochs: 5
+  
+  # 优化器
+  optimizer: "adamw"  # adamw, sgd
+  momentum: 0.9  # for SGD
+  
+  # 学习率调度
+  scheduler: "cosine"  # cosine, step, plateau
+  lr_min: 1e-6
+  
+  # 损失权重策略
+  use_dynamic_weights: true
+  use_uncertainty_weighting: false
+  
+  # 动态权重参数
+  alpha_start: 0.5
+  alpha_end: 1.0
+  beta_start: 1.0
+  beta_end: 0.3
+  warmup_epochs_weight: 20
+  
+  # Focal Loss（可选）
+  use_focal_loss: false
+  focal_alpha: 0.25
+  focal_gamma: 2.0
+
+# 数据增强配置
+augmentation:
+  horizontal_flip: 0.5
+  vertical_flip: 0.5
+  rotate90: 0.5
+  shift_scale_rotate:
+    shift_limit: 0.1
+    scale_limit: 0.2
+    rotate_limit: 45
+    p: 0.5
+  noise:
+    gaussian_noise: 0.3
+    gaussian_blur: 0.3
+    motion_blur: 0.3
+  color:
+    brightness_contrast: 0.3
+    hue_saturation: 0.3
+
+# 保存配置
+checkpoint:
+  save_dir: "checkpoints/defect_model"
+  save_freq: 10  # 每 N 个 epoch 保存一次
+  save_best_acc: true
+  save_best_iou: true
+
+# 日志配置
+logging:
+  log_dir: "logs"
+  tensorboard: true
+  wandb: false
+  wandb_project: "defect-detection"
+
+# 推理配置
+inference:
+  checkpoint: "checkpoints/defect_model/best_accuracy.pth"
+  image_size: 518
+  threshold: 0.5  # 分割阈值
+  output_dir: "results"
+  visualize: true
+
+# 硬件配置
+hardware:
+  device: "cuda"  # cuda, cpu
+  mixed_precision: true  # 混合精度训练
+  num_gpus: 1
