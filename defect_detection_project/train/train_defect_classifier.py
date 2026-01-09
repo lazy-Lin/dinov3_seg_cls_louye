@@ -9,7 +9,7 @@ from tqdm import tqdm
 import numpy as np
 from pathlib import Path
 
-from dinov3.models.defect_classifier import (
+from defect_detection_project.models.defect_classifier import (
     AttentionGuidedDefectClassifier,
     MultiTaskLoss,
     DynamicWeightScheduler

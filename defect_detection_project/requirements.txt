@@ -1,4 +1,4 @@
-# 瑕疵检测模型额外依赖
+# 瑕疵检测项目依赖
 
 # 核心依赖
 torch>=2.0.0
@@ -18,11 +18,10 @@ scikit-learn>=1.2.0
 matplotlib>=3.7.0
 
 # 可选：日志和实验跟踪
-tensorboard>=2.13.0
-# wandb>=0.15.0  # 如果需要 Weights & Biases
+# tensorboard>=2.13.0
+# wandb>=0.15.0
 
 # 可选：分割损失函数
 # segmentation-models-pytorch>=0.3.3
 
-# 可选：混合精度训练
-# apex  # NVIDIA Apex for mixed precision training
+# 注意：DINOv3 会通过 torch.hub 自动下载，无需手动安装

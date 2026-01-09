@@ -31,7 +31,7 @@ echo 目标: 快速训练分类和分割头
 echo 预期: 分类准确率 90-93%%, 分割 IoU 0.70-0.75
 echo ==========================================
 
-python examples/train_defect_model.py --data_root %DATA_ROOT% --backbone %BACKBONE% --image_size %IMAGE_SIZE% --freeze_backbone --batch_size 32 --epochs 30 --lr 1e-3 --weight_decay 0.01 --dropout 0.2 --use_dynamic_weights --save_dir checkpoints/stage1_frozen --num_workers 4
+python defect_detection_project/scripts/train_defect_model.py --data_root %DATA_ROOT% --backbone %BACKBONE% --image_size %IMAGE_SIZE% --freeze_backbone --batch_size 32 --epochs 30 --lr 1e-3 --weight_decay 0.01 --dropout 0.2 --use_dynamic_weights --save_dir checkpoints/stage1_frozen --num_workers 4
 
 if errorlevel 1 (
     echo 阶段 1 训练失败！
@@ -53,7 +53,7 @@ echo 目标: 端到端优化，提升性能
 echo 预期: 分类准确率 96-99%%, 分割 IoU 0.80-0.90
 echo ==========================================
 
-python examples/train_defect_model.py --data_root %DATA_ROOT% --backbone %BACKBONE% --image_size %IMAGE_SIZE% --batch_size 16 --epochs 70 --lr 5e-5 --weight_decay 0.05 --dropout 0.2 --use_dynamic_weights --save_dir checkpoints/stage2_finetune --num_workers 4
+python defect_detection_project/scripts/train_defect_model.py --data_root %DATA_ROOT% --backbone %BACKBONE% --image_size %IMAGE_SIZE% --batch_size 16 --epochs 70 --lr 5e-5 --weight_decay 0.05 --dropout 0.2 --use_dynamic_weights --save_dir checkpoints/stage2_finetune --num_workers 4
 
 if errorlevel 1 (
     echo 阶段 2 训练失败！
@@ -77,7 +77,7 @@ echo ==========================================
 
 set /p STAGE3="是否执行阶段 3？(y/n): "
 if /i "%STAGE3%"=="y" (
-    python examples/train_defect_model.py --data_root %DATA_ROOT% --backbone %BACKBONE% --image_size %IMAGE_SIZE% --batch_size 16 --epochs 20 --lr 1e-5 --weight_decay 0.05 --dropout 0.2 --use_uncertainty_weighting --save_dir checkpoints/stage3_uncertainty --num_workers 4
+    python defect_detection_project/scripts/train_defect_model.py --data_root %DATA_ROOT% --backbone %BACKBONE% --image_size %IMAGE_SIZE% --batch_size 16 --epochs 20 --lr 1e-5 --weight_decay 0.05 --dropout 0.2 --use_uncertainty_weighting --save_dir checkpoints/stage3_uncertainty --num_workers 4
     
     if errorlevel 1 (
         echo 阶段 3 训练失败！

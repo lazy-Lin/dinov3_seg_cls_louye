@@ -4,12 +4,15 @@
 
 import torch
 import sys
+import os
 from pathlib import Path
 
-# 添加项目路径
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add project root to sys.path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(current_dir))
+sys.path.append(project_root)
 
-from dinov3.models.defect_classifier import (
+from defect_detection_project.models.defect_classifier import (
     AttentionGuidedDefectClassifier,
     MultiTaskLoss,
     DynamicWeightScheduler

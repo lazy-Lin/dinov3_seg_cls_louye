@@ -18,7 +18,7 @@ python examples/train_defect_model.py --data_root data/defect_demo --backbone di
 REM 3. 推理测试
 echo.
 echo [3/4] 运行推理...
-python examples/inference_defect_model.py --checkpoint checkpoints/demo/best_accuracy.pth --backbone dinov3_vits14 --image_dir data/defect_demo/images --output_dir results/demo
+python defect_detection_project/scripts/inference_defect_model.py --checkpoint checkpoints/demo/best_accuracy.pth --backbone dinov3_vits14 --image_dir data/defect_demo/images --output_dir results/demo
 
 REM 4. 完成
 echo.

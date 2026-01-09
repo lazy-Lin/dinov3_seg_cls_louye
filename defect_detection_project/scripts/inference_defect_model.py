@@ -10,9 +10,16 @@ from PIL import Image
 import argparse
 from pathlib import Path
 import cv2
+import sys
+import os
+
+# Add project root to sys.path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(current_dir))
+sys.path.append(project_root)
 
 import dinov3
-from dinov3.models.defect_classifier import AttentionGuidedDefectClassifier
+from defect_detection_project.models.defect_classifier import AttentionGuidedDefectClassifier
 
 
 def load_model(checkpoint_path, backbone_name='dinov3_vitb14', device='cuda'):
