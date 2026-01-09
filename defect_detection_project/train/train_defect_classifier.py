@@ -8,6 +8,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import numpy as np
 from pathlib import Path
+import mlflow
 
 from defect_detection_project.models.defect_classifier import (
     AttentionGuidedDefectClassifier,
@@ -148,7 +149,8 @@ def train_multitask_model(
     device='cuda',
     save_dir='checkpoints',
     use_dynamic_weights=True,
-    use_uncertainty_weighting=False
+    use_uncertainty_weighting=False,
+    use_mlflow=False
 ):
     """
     多任务模型训练主函数
@@ -164,6 +166,7 @@ def train_multitask_model(
         save_dir: 模型保存目录
         use_dynamic_weights: 是否使用动态权重调整
         use_uncertainty_weighting: 是否使用不确定性加权
+        use_mlflow: 是否使用 mlflow 记录
     """
     model = model.to(device)
     
@@ -236,6 +239,26 @@ def train_multitask_model(
               f"IoU: {val_metrics['iou']:.4f}, "
               f"Dice: {val_metrics['dice']:.4f}")
         
+        # MLflow logging
+        if use_mlflow:
+            mlflow.log_metrics({
+                "train_loss": train_metrics['loss'],
+                "train_cls_loss": train_metrics['cls_loss'],
+                "train_seg_loss": train_metrics['seg_loss'],
+                "train_acc": train_metrics['accuracy'],
+                "train_iou": train_metrics['iou'],
+                "train_dice": train_metrics['dice'],
+                "val_loss": val_metrics['loss'],
+                "val_cls_loss": val_metrics['cls_loss'],
+                "val_seg_loss": val_metrics['seg_loss'],
+                "val_acc": val_metrics['accuracy'],
+                "val_iou": val_metrics['iou'],
+                "val_dice": val_metrics['dice'],
+                "learning_rate": optimizer.param_groups[0]['lr'],
+                "loss_alpha": criterion.alpha,
+                "loss_beta": criterion.beta
+            }, step=epoch)
+
         # 保存最佳模型
         if val_metrics['accuracy'] > best_val_acc:
             best_val_acc = val_metrics['accuracy']

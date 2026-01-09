@@ -8,8 +8,9 @@ import argparse
 from pathlib import Path
 import sys
 import os
+import mlflow
+import yaml
 
-# Add project root to sys.path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir))
 sys.path.append(project_root)
@@ -23,17 +24,40 @@ from defect_detection_project.data.defect_dataset import create_dataloaders
 from defect_detection_project.train.train_defect_classifier import train_multitask_model
 
 
+def load_config(config_path):
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+    return config
+
 def main(args):
+    # 加载配置
+    config_path = Path(args.config)
+    if not config_path.exists():
+        # 尝试在默认路径查找
+        default_config = Path(project_root) / 'defect_detection_project' / 'configs' / 'config_defect_detection.yaml'
+        if default_config.exists():
+            print(f"Config not found at {config_path}, using default: {default_config}")
+            config_path = default_config
+        else:
+            raise FileNotFoundError(f"Config file not found: {config_path}")
+            
+    config = load_config(config_path)
+    
+    # 优先使用命令行参数覆盖配置
+    data_root = args.data_root if args.data_root else config['data']['data_root']
+    
     # 设置设备
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
     # 加载预训练的 DINOv3 模型
-    print("Loading DINOv3 backbone...")
-    backbone = torch.hub.load('facebookresearch/dinov3', 'dinov3_vits14')
+    backbone_name = config['model']['backbone']
+    print(f"Loading DINOv3 backbone: {backbone_name}...")
+    backbone = torch.hub.load('facebookresearch/dinov3', backbone_name)
     
-    # 冻结骨干网络（可选，初期训练时推荐）
-    if args.freeze_backbone:
+    # 冻结骨干网络
+    freeze_backbone = args.freeze_backbone or config['model']['freeze_backbone']
+    if freeze_backbone:
         print("Freezing backbone parameters...")
         for param in backbone.parameters():
             param.requires_grad = False
@@ -42,41 +66,73 @@ def main(args):
     print("Creating multi-task model...")
     model = AttentionGuidedDefectClassifier(
         backbone=backbone,
-        embed_dim=384,  # ViT-S/14 的嵌入维度
-        num_classes=2,
-        seg_channels=1,
-        dropout=args.dropout
+        embed_dim=config['model']['embed_dim'],
+        num_classes=config['model']['num_classes'],
+        seg_channels=config['model']['seg_channels'],
+        dropout=config['model']['dropout']
     )
     
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()) / 1e6:.2f}M")
     print(f"Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6:.2f}M")
     
     # 创建数据加载器
-    print(f"Loading data from {args.data_root}...")
+    print(f"Loading data from {data_root}...")
     train_loader, val_loader = create_dataloaders(
-        data_root=args.data_root,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        image_size=args.image_size
+        data_root=data_root,
+        batch_size=config['data']['batch_size'],
+        num_workers=config['data']['num_workers'],
+        image_size=config['data']['image_size']
     )
     
     print(f"Train batches: {len(train_loader)}")
     print(f"Val batches: {len(val_loader)}")
     
+    # 配置 MLflow
+    mlflow_config = config['logging']['mlflow']
+    enable_mlflow = args.enable_mlflow or mlflow_config['enabled']
+    
+    if enable_mlflow:
+        tracking_uri = args.mlflow_tracking_uri if args.mlflow_tracking_uri else mlflow_config['tracking_uri']
+        experiment_name = args.mlflow_experiment_name if args.mlflow_experiment_name else mlflow_config['experiment_name']
+        
+        print(f"Configuring MLflow with URI: {tracking_uri}")
+        mlflow.set_tracking_uri(tracking_uri)
+        mlflow.set_experiment(experiment_name)
+        mlflow.start_run()
+        
+        # 记录超参数
+        mlflow.log_params({
+            "backbone": backbone_name,
+            "embed_dim": config['model']['embed_dim'],
+            "batch_size": config['data']['batch_size'],
+            "epochs": config['training']['epochs'],
+            "lr": config['training']['lr'],
+            "weight_decay": config['training']['weight_decay'],
+            "image_size": config['data']['image_size'],
+            "freeze_backbone": freeze_backbone,
+            "use_dynamic_weights": config['training']['use_dynamic_weights'],
+            "use_uncertainty_weighting": config['training']['use_uncertainty_weighting']
+        })
+
     # 开始训练
     print("\nStarting training...")
-    trained_model = train_multitask_model(
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        epochs=args.epochs,
-        lr=args.lr,
-        weight_decay=args.weight_decay,
-        device=device,
-        save_dir=args.save_dir,
-        use_dynamic_weights=args.use_dynamic_weights,
-        use_uncertainty_weighting=args.use_uncertainty_weighting
-    )
+    try:
+        trained_model = train_multitask_model(
+            model=model,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            epochs=config['training']['epochs'],
+            lr=config['training']['lr'],
+            weight_decay=config['training']['weight_decay'],
+            device=device,
+            save_dir=config['checkpoint']['save_dir'],
+            use_dynamic_weights=config['training']['use_dynamic_weights'],
+            use_uncertainty_weighting=config['training']['use_uncertainty_weighting'],
+            use_mlflow=enable_mlflow
+        )
+    finally:
+        if enable_mlflow:
+            mlflow.end_run()
     
     print("Training completed!")
 
@@ -84,40 +140,18 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train defect detection model')
     
-    # 数据参数
-    parser.add_argument('--data_root', type=str, required=True,
-                        help='Root directory of dataset')
-    parser.add_argument('--image_size', type=int, default=518,
-                        help='Input image size')
-    parser.add_argument('--batch_size', type=int, default=32,
-                        help='Batch size')
-    parser.add_argument('--num_workers', type=int, default=4,
-                        help='Number of data loading workers')
+    # 配置文件
+    parser.add_argument('--config', type=str, default='defect_detection_project/configs/config_defect_detection.yaml',
+                        help='Path to config file')
     
-    # 模型参数
-    parser.add_argument('--freeze_backbone', action='store_true',
-                        help='Freeze backbone parameters')
-    parser.add_argument('--dropout', type=float, default=0.2,
-                        help='Dropout rate')
+    # 覆盖参数（可选）
+    parser.add_argument('--data_root', type=str, help='Override data root')
+    parser.add_argument('--freeze_backbone', action='store_true', help='Override freeze backbone')
     
-    # 训练参数
-    parser.add_argument('--epochs', type=int, default=100,
-                        help='Number of training epochs')
-    parser.add_argument('--lr', type=float, default=1e-4,
-                        help='Learning rate')
-    parser.add_argument('--weight_decay', type=float, default=0.05,
-                        help='Weight decay')
-    
-    # 损失权重策略
-    parser.add_argument('--use_dynamic_weights', action='store_true',
-                        help='Use dynamic weight scheduling')
-    parser.add_argument('--use_uncertainty_weighting', action='store_true',
-                        help='Use uncertainty-based weighting')
-    
-    # 保存参数
-    parser.add_argument('--save_dir', type=str, default='checkpoints',
-                        help='Directory to save checkpoints')
-    
+    # MLflow 覆盖参数
+    parser.add_argument('--enable_mlflow', action='store_true', help='Force enable MLflow')
+    parser.add_argument('--mlflow_tracking_uri', type=str, help='Override MLflow tracking URI')
+    parser.add_argument('--mlflow_experiment_name', type=str, help='Override MLflow experiment name')
+
     args = parser.parse_args()
-    
     main(args)

@@ -2,7 +2,7 @@
 
 # 数据配置
 data:
-  data_root: "data/defect_dataset"
+  data_root: r"C:\Users\Admin\Desktop\dinov3_seg_cls\defect_detection_project\data"
   image_size: 518
   batch_size: 32
   num_workers: 4
@@ -79,6 +79,10 @@ logging:
   tensorboard: true
   wandb: false
   wandb_project: "defect-detection"
+  mlflow:
+    enabled: true
+    tracking_uri: "http://192.168.20.141:5000"
+    experiment_name: "dinov3_defect_detection"
 
 # 推理配置
 inference:
