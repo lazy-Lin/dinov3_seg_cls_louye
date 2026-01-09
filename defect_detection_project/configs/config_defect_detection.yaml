@@ -2,7 +2,7 @@
 
 # 数据配置
 data:
-  data_root: r"C:\Users\Admin\Desktop\dinov3_seg_cls\defect_detection_project\data"
+  data_root: "C:/Users/Admin/Desktop/dinov3_seg_cls/defect_detection_project/data"
   image_size: 518
   batch_size: 32
   num_workers: 4

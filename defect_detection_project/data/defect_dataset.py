@@ -19,15 +19,16 @@ class DefectDataset(Dataset):
     数据组织结构：
     data_root/
         images/
-            defect_001.jpg
-            defect_002.jpg
-            normal_001.jpg
-            ...
+            defect/  # 瑕疵图片文件夹
+                xxx.jpg
+            normal/  # 正常图片文件夹
+                yyy.jpg
         masks/
-            defect_001.png  # 二值掩码
-            defect_002.png
+            xxx.png  # 二值掩码
             # 正常样本无需 mask
-        labels.txt  # 格式: image_name,label (0=正常, 1=瑕疵)
+        labels/      # 标签文件夹
+            train_labels.txt  # 格式: image_name,label (0=正常, 1=瑕疵)
+            val_labels.txt
     """
     
     def __init__(
@@ -40,6 +41,9 @@ class DefectDataset(Dataset):
         self.data_root = Path(data_root)
         self.image_dir = self.data_root / 'images'
         self.mask_dir = self.data_root / 'masks'
+        # 兼容旧路径（labels.txt 直接在 data_root 下）和新路径（labels/labels.txt）
+        self.labels_dir = self.data_root / 'labels' if (self.data_root / 'labels').exists() else self.data_root
+        
         self.image_size = image_size
         self.augment = augment and split == 'train'
         
@@ -51,36 +55,99 @@ class DefectDataset(Dataset):
     
     def _load_samples(self, split):
         """加载样本列表"""
-        label_file = self.data_root / f'{split}_labels.txt'
+        label_file = self.labels_dir / f'{split}_labels.txt'
         
         samples = []
-        with open(label_file, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
+        try:
+            # 尝试使用 UTF-8 编码
+            with open(label_file, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+        except UnicodeDecodeError:
+            # 如果失败，尝试使用 GBK 编码（兼容 Windows 生成的文件）
+            print(f"Warning: Failed to read {label_file} with UTF-8, trying GBK...")
+            with open(label_file, 'r', encoding='gbk') as f:
+                lines = f.readlines()
+
+        # 缓存 images 目录下的所有文件路径，以便快速查找
+        # 假设 images 下面有子文件夹 (如 defect, normal) 或直接是图片
+        print(f"Scanning images in {self.image_dir}...")
+        image_path_map = {}
+        for p in self.image_dir.rglob('*'):
+            if p.is_file() and p.suffix.lower() in ['.jpg', '.jpeg', '.png', '.bmp', '.heic']:
+                image_path_map[p.name] = p
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            
+            parts = line.split(',')
+            image_name = parts[0]
+            label = int(parts[1])
+            
+            # 在 image_path_map 中查找图片路径
+            if image_name in image_path_map:
+                image_path = image_path_map[image_name]
+            else:
+                print(f"Warning: Image {image_name} not found in {self.image_dir} (recursive search), skipping...")
+                continue
+            
+            # 瑕疵样本需要 mask
+            if label == 1:
+                # 尝试查找 mask 文件
+                # 策略1: 去掉 _defect 后缀 (例如 xxx_defect.jpg -> xxx.png)
+                mask_name_v1 = image_name.replace('.jpg', '.png').replace('.jpeg', '.png').replace('_defect', '')
+                mask_path_v1 = self.mask_dir / mask_name_v1
                 
-                parts = line.split(',')
-                image_name = parts[0]
-                label = int(parts[1])
+                # 策略2: 直接替换后缀 (例如 xxx.jpg -> xxx.png)
+                mask_name_v2 = image_name.replace('.jpg', '.png').replace('.jpeg', '.png')
+                mask_path_v2 = self.mask_dir / mask_name_v2
+
+                # 策略3: 兼容复杂后缀 (例如 ..._Q90.jpg__defect.jpg -> ..._Q90.png)
+                # 移除所有可能的扩展名后缀，然后加上 .png
+                base_name = image_name
+                # 反复移除可能的扩展名，直到没有为止
+                while True:
+                    stem = Path(base_name).stem
+                    if stem == base_name:
+                        break
+                    base_name = stem
                 
-                image_path = self.image_dir / image_name
+                # 移除 _defect
+                base_name = base_name.replace('_defect', '')
+                # 移除可能残留的 .jpg, .png 等（虽然stem应该已经处理了，但为了保险）
+                base_name = base_name.replace('.jpg', '').replace('.jpeg', '').replace('.png', '')
                 
-                # 瑕疵样本需要 mask
-                if label == 1:
-                    mask_name = image_name.replace('.jpg', '.png').replace('.jpeg', '.png')
-                    mask_path = self.mask_dir / mask_name
-                    if not mask_path.exists():
-                        print(f"Warning: Mask not found for {image_name}, skipping...")
-                        continue
+                mask_name_v3 = base_name + '.png'
+                mask_path_v3 = self.mask_dir / mask_name_v3
+                
+                if mask_path_v1.exists():
+                    mask_path = mask_path_v1
+                elif mask_path_v2.exists():
+                    mask_path = mask_path_v2
+                elif mask_path_v3.exists():
+                     mask_path = mask_path_v3
                 else:
-                    mask_path = None
-                
-                samples.append({
-                    'image_path': image_path,
-                    'mask_path': mask_path,
-                    'label': label
-                })
+                    # 尝试模糊匹配，因为文件名可能经过了 url 编码或者截断等处理
+                    # 只取前 20 个字符进行匹配
+                    found = False
+                    prefix = image_name[:20]
+                    for m_path in self.mask_dir.glob(f"{prefix}*.png"):
+                        mask_path = m_path
+                        found = True
+                        break
+                    
+                    if not found:
+                        print(f"Warning: Mask not found for {image_name} (tried {mask_name_v1}, {mask_name_v2}, {mask_name_v3}), skipping...")
+                        continue
+            else:
+                mask_path = None
+            
+            samples.append({
+                'image_path': image_path,
+                'mask_path': mask_path,
+                'label': label
+            })
         
         print(f"Loaded {len(samples)} samples for {split}")
         return samples

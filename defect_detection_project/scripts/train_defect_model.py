@@ -53,7 +53,8 @@ def main(args):
     # 加载预训练的 DINOv3 模型
     backbone_name = config['model']['backbone']
     print(f"Loading DINOv3 backbone: {backbone_name}...")
-    backbone = torch.hub.load('facebookresearch/dinov3', backbone_name)
+    # 使用本地 hubconf 加载模型，确保使用本地缓存的权重
+    backbone = torch.hub.load(project_root, backbone_name, source='local', pretrained=True)
     
     # 冻结骨干网络
     freeze_backbone = args.freeze_backbone or config['model']['freeze_backbone']
@@ -122,8 +123,8 @@ def main(args):
             train_loader=train_loader,
             val_loader=val_loader,
             epochs=config['training']['epochs'],
-            lr=config['training']['lr'],
-            weight_decay=config['training']['weight_decay'],
+            lr=float(config['training']['lr']),
+            weight_decay=float(config['training']['weight_decay']),
             device=device,
             save_dir=config['checkpoint']['save_dir'],
             use_dynamic_weights=config['training']['use_dynamic_weights'],
