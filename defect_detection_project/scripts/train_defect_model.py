@@ -4,16 +4,19 @@
 """
 
 import torch
-import argparse
-from pathlib import Path
 import sys
 import os
+from pathlib import Path
+
+# 确保项目根目录在 sys.path 中，以便导入 defect_detection_project
+current_dir = os.path.dirname(os.path.abspath(__file__))
+# scripts -> defect_detection_project -> root
+project_root = os.path.dirname(os.path.dirname(current_dir))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 import mlflow
 import yaml
-
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(os.path.dirname(current_dir))
-sys.path.append(project_root)
 
 # 导入 DINOv3
 import dinov3
@@ -139,20 +142,31 @@ def main(args):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Train defect detection model')
-    
-    # 配置文件
-    parser.add_argument('--config', type=str, default='defect_detection_project/configs/config_defect_detection.yaml',
-                        help='Path to config file')
-    
-    # 覆盖参数（可选）
-    parser.add_argument('--data_root', type=str, help='Override data root')
-    parser.add_argument('--freeze_backbone', action='store_true', help='Override freeze backbone')
-    
-    # MLflow 覆盖参数
-    parser.add_argument('--enable_mlflow', action='store_true', help='Force enable MLflow')
-    parser.add_argument('--mlflow_tracking_uri', type=str, help='Override MLflow tracking URI')
-    parser.add_argument('--mlflow_experiment_name', type=str, help='Override MLflow experiment name')
+    # 硬编码参数配置，替代 argparse
+    class Args:
+        # 配置文件路径
+        config = 'defect_detection_project/configs/config_defect_detection.yaml'
+        
+        # 数据集根目录 (None 表示使用配置文件中的值)
+        data_root = None
+        # data_root = r"C:\Users\Admin\Desktop\dinov3_seg_cls\defect_detection_project\data"
+        
+        # 是否冻结骨干网络
+        freeze_backbone = False
+        
+        # MLflow 设置
+        enable_mlflow = False  # 强制开启
+        no_mlflow = True       # 强制关闭 (优先级更高)
+        mlflow_tracking_uri = None
+        mlflow_experiment_name = None
 
-    args = parser.parse_args()
+    args = Args()
+    
+    # 打印当前配置
+    print("Running with hardcoded arguments:")
+    print(f"  config: {args.config}")
+    print(f"  data_root: {args.data_root}")
+    print(f"  freeze_backbone: {args.freeze_backbone}")
+    print(f"  mlflow: enable={args.enable_mlflow}, disable={args.no_mlflow}")
+    
     main(args)

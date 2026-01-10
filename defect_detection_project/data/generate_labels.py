@@ -1,8 +1,3 @@
-"""
-生成数据集标签文件脚本
-扫描 images 目录，根据文件名规则生成 train_labels.txt 和 val_labels.txt
-"""
-
 import os
 import argparse
 import random
@@ -29,7 +24,12 @@ def generate_labels(
     config_path=None
 ):
     """
-    生成标签文件
+    生成标签划分文件 (train.txt / val.txt)
+    
+    扫描 images/normal 和 images/defect 目录，生成训练和验证集的划分文件。
+    生成的文件内容为相对于 images/ 目录的路径，例如：
+    defect/001.jpg
+    normal/002.jpg
     """
     # 优先使用 config 中的参数
     if config_path:
@@ -56,6 +56,8 @@ def generate_labels(
         print("请确保数据结构如下:")
         print(f"{data_root}/")
         print("  └── images/")
+        print("      ├── defect/")
+        print("      └── normal/")
         return
 
     # 扫描图片
@@ -64,96 +66,70 @@ def generate_labels(
     
     print(f"正在扫描 {images_dir} ...")
     
-    # 递归扫描所有子目录
-    for f in images_dir.rglob('*'):
-        if f.is_file() and f.suffix.lower() in valid_exts:
-            # 记录相对路径或者直接记录文件名（如果文件名唯一）
-            # 根据 defect_dataset.py 的逻辑，它只存储文件名，然后通过 map 查找
-            # 所以这里我们只需要存储文件名，或者存储相对路径，但 dataset 那边用的是 name
-            # 为了兼容性，我们存储文件名
-            all_images.append(f)
+    # 分别扫描 defect 和 normal 目录
+    defect_dir = images_dir / 'defect'
+    normal_dir = images_dir / 'normal'
+    
+    defect_count = 0
+    normal_count = 0
+    
+    # 扫描 defect
+    if defect_dir.exists():
+        for f in defect_dir.rglob('*'):
+            if f.is_file() and f.suffix.lower() in valid_exts:
+                # 获取相对于 images 的路径
+                rel_path = f.relative_to(images_dir)
+                all_images.append(str(rel_path).replace('\\', '/'))
+                defect_count += 1
+    else:
+        print(f"Warning: Defect directory not found: {defect_dir}")
+
+    # 扫描 normal
+    if normal_dir.exists():
+        for f in normal_dir.rglob('*'):
+            if f.is_file() and f.suffix.lower() in valid_exts:
+                # 获取相对于 images 的路径
+                rel_path = f.relative_to(images_dir)
+                all_images.append(str(rel_path).replace('\\', '/'))
+                normal_count += 1
+    else:
+        print(f"Warning: Normal directory not found: {normal_dir}")
             
     if not all_images:
         print("未找到任何图片文件！")
         return
 
     print(f"共找到 {len(all_images)} 张图片")
-
-    # 打标
-    samples = []
-    defect_count = 0
-    normal_count = 0
-    unknown_count = 0
-
-    for img_path in all_images:
-        img_name = img_path.name
-        # 优先使用父文件夹名称作为类别判定依据
-        # 注意：这里的 parent 是直接父目录。
-        # 如果结构是 images/louye/images/xxx.jpg，那么 parent 是 images
-        # 这种情况下我们需要往上找一级，直到找到 defect_keyword 或 normal_keyword
-        
-        # 获取从 images 目录开始的相对路径
-        try:
-            rel_path = img_path.relative_to(images_dir)
-            # rel_path.parts 会是一个元组，例如 ('louye', 'images', 'xxx.jpg')
-            path_parts = [p.lower() for p in rel_path.parts]
-        except ValueError:
-            # 如果 img_path 不在 images_dir 下（不太可能，因为我们是用 rglob 找的），回退到直接父目录
-            path_parts = [img_path.parent.name.lower()]
-            rel_path = img_path.parent.name
-            
-        name_lower = img_name.lower()
-        
-        # 判定规则：
-        # 1. 直接检查父文件夹名称
-        # 如果父文件夹名称包含 normal_keyword，则为正常样本(0)
-        # 否则默认为瑕疵样本(1)
-        
-        # 获取直接父目录名称
-        parent_dir = img_path.parent.name.lower()
-        
-        if normal_keyword in parent_dir:
-            label = 0
-            normal_count += 1
-        else:
-            # 只要不是 normal，就认为是 defect
-            # 即使父文件夹是 defect_keyword 或者其他名称（如 louye），都算瑕疵
-            label = 1
-            defect_count += 1
-            
-        samples.append((img_name, label))
-
-    print(f"\n统计:")
-    print(f"  瑕疵样本 (1): {defect_count + unknown_count}")
+    print(f"  瑕疵样本 (1): {defect_count}")
     print(f"  正常样本 (0): {normal_count}")
     
     # 随机打乱
     random.seed(seed)
-    random.shuffle(samples)
+    random.shuffle(all_images)
     
     # 划分数据集
-    val_size = int(len(samples) * val_split)
-    train_samples = samples[val_size:]
-    val_samples = samples[:val_size]
+    val_size = int(len(all_images) * val_split)
+    train_samples = all_images[val_size:]
+    val_samples = all_images[:val_size]
     
     print(f"\n划分结果 (验证集比例 {val_split}):")
     print(f"  训练集: {len(train_samples)}")
     print(f"  验证集: {len(val_samples)}")
     
-    # 确保 labels 目录存在
-    labels_dir = data_root / 'labels'
-    labels_dir.mkdir(exist_ok=True)
+    # 确保 splits 目录存在
+    splits_dir = data_root / 'splits'
+    splits_dir.mkdir(exist_ok=True)
     
     # 写入文件
     def write_txt(filename, data):
-        path = labels_dir / filename
+        path = splits_dir / filename
         with open(path, 'w', encoding='utf-8') as f:
-            for name, label in data:
-                f.write(f"{name},{label}\n")
+            for line in data:
+                f.write(f"{line}\n")
         print(f"已生成: {path}")
 
-    write_txt('train_labels.txt', train_samples)
-    write_txt('val_labels.txt', val_samples)
+    write_txt('train.txt', train_samples)
+    write_txt('val.txt', val_samples)
     print("\n完成！")
 
 if __name__ == '__main__':

@@ -170,6 +170,11 @@ def train_multitask_model(
     """
     model = model.to(device)
     
+    # 多卡支持
+    if device.type == 'cuda' and torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
+        model = nn.DataParallel(model)
+    
     # 优化器
     optimizer = torch.optim.AdamW(
         model.parameters(), 
@@ -262,9 +267,11 @@ def train_multitask_model(
         # 保存最佳模型
         if val_metrics['accuracy'] > best_val_acc:
             best_val_acc = val_metrics['accuracy']
+            # 处理 DataParallel 的 state_dict
+            model_to_save = model.module if isinstance(model, nn.DataParallel) else model
             torch.save({
                 'epoch': epoch,
-                'model_state_dict': model.state_dict(),
+                'model_state_dict': model_to_save.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'val_metrics': val_metrics
             }, save_dir / 'best_accuracy.pth')
@@ -272,22 +279,25 @@ def train_multitask_model(
         
         if val_metrics['iou'] > best_val_iou:
             best_val_iou = val_metrics['iou']
+            # 处理 DataParallel 的 state_dict
+            model_to_save = model.module if isinstance(model, nn.DataParallel) else model
             torch.save({
                 'epoch': epoch,
-                'model_state_dict': model.state_dict(),
+                'model_state_dict': model_to_save.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'val_metrics': val_metrics
             }, save_dir / 'best_iou.pth')
             print(f"✓ Saved best IoU model: {best_val_iou:.4f}")
         
-        # 定期保存检查点
-        if epoch % 10 == 0:
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'val_metrics': val_metrics
-            }, save_dir / f'checkpoint_epoch_{epoch}.pth')
+        # 保存最后一个 epoch 的模型 (覆盖更新)
+        # 处理 DataParallel 的 state_dict
+        model_to_save = model.module if isinstance(model, nn.DataParallel) else model
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': model_to_save.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'val_metrics': val_metrics
+        }, save_dir / 'last.pth')
     
     print(f"\nTraining completed!")
     print(f"Best validation accuracy: {best_val_acc:.4f}")

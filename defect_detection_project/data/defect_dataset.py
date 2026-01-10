@@ -20,15 +20,11 @@ class DefectDataset(Dataset):
     data_root/
         images/
             defect/  # 瑕疵图片文件夹
-                xxx.jpg
             normal/  # 正常图片文件夹
-                yyy.jpg
         masks/
-            xxx.png  # 二值掩码
-            # 正常样本无需 mask
-        labels/      # 标签文件夹
-            train_labels.txt  # 格式: image_name,label (0=正常, 1=瑕疵)
-            val_labels.txt
+            xxx.png  # 二值掩码 (扁平结构，所有图片都有对应的 mask，normal 为全黑)
+        labels/      # 标注信息 (扁平结构，YOLO 格式 txt)
+            xxx.txt
     """
     
     def __init__(
@@ -41,13 +37,17 @@ class DefectDataset(Dataset):
         self.data_root = Path(data_root)
         self.image_dir = self.data_root / 'images'
         self.mask_dir = self.data_root / 'masks'
-        # 兼容旧路径（labels.txt 直接在 data_root 下）和新路径（labels/labels.txt）
-        self.labels_dir = self.data_root / 'labels' if (self.data_root / 'labels').exists() else self.data_root
+        self.labels_dir = self.data_root / 'labels'
+        
+        # 兼容划分文件
+        self.split_dir = self.data_root / 'splits'
+        if not self.split_dir.exists():
+             self.split_dir = self.data_root / 'labels' # 兼容旧逻辑
         
         self.image_size = image_size
         self.augment = augment and split == 'train'
         
-        # 读取标签文件
+        # 读取划分文件
         self.samples = self._load_samples(split)
         
         # 数据增强
@@ -55,97 +55,98 @@ class DefectDataset(Dataset):
     
     def _load_samples(self, split):
         """加载样本列表"""
-        label_file = self.labels_dir / f'{split}_labels.txt'
+        # 尝试读取 split 文件 (train.txt / val.txt)
+        # 格式：相对路径/文件名 (例如 defect/001.jpg)
+        split_file = self.split_dir / f'{split}.txt'
         
+        # 如果找不到 split 文件，尝试找旧版的 labels.txt
+        if not split_file.exists():
+             split_file = self.split_dir / f'{split}_labels.txt'
+        
+        if not split_file.exists():
+            raise FileNotFoundError(f"Split file not found: {split_file}")
+
         samples = []
-        try:
-            # 尝试使用 UTF-8 编码
-            with open(label_file, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-        except UnicodeDecodeError:
-            # 如果失败，尝试使用 GBK 编码（兼容 Windows 生成的文件）
-            print(f"Warning: Failed to read {label_file} with UTF-8, trying GBK...")
-            with open(label_file, 'r', encoding='gbk') as f:
-                lines = f.readlines()
+        with open(split_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
 
-        # 缓存 images 目录下的所有文件路径，以便快速查找
-        # 假设 images 下面有子文件夹 (如 defect, normal) 或直接是图片
         print(f"Scanning images in {self.image_dir}...")
-        image_path_map = {}
-        for p in self.image_dir.rglob('*'):
-            if p.is_file() and p.suffix.lower() in ['.jpg', '.jpeg', '.png', '.bmp', '.heic']:
-                image_path_map[p.name] = p
-
+        
         for line in lines:
             line = line.strip()
             if not line:
                 continue
             
-            parts = line.split(',')
-            image_name = parts[0]
-            label = int(parts[1])
+            # 兼容两种格式：
+            # 1. image_name,label (旧格式)
+            # 2. relative_path (新格式，例如 defect/xxx.jpg)
             
-            # 在 image_path_map 中查找图片路径
-            if image_name in image_path_map:
-                image_path = image_path_map[image_name]
+            if ',' in line:
+                image_name = line.split(',')[0]
+                # 旧逻辑：需要去 images 下递归找
+                # 这里简化：假设文件名是唯一的
+                found_path = list(self.image_dir.rglob(image_name))
+                if not found_path:
+                    print(f"Warning: Image {image_name} not found, skipping...")
+                    continue
+                image_path = found_path[0]
             else:
-                print(f"Warning: Image {image_name} not found in {self.image_dir} (recursive search), skipping...")
-                continue
-            
-            # 瑕疵样本需要 mask
-            if label == 1:
-                # 尝试查找 mask 文件
-                # 策略1: 去掉 _defect 后缀 (例如 xxx_defect.jpg -> xxx.png)
-                mask_name_v1 = image_name.replace('.jpg', '.png').replace('.jpeg', '.png').replace('_defect', '')
-                mask_path_v1 = self.mask_dir / mask_name_v1
-                
-                # 策略2: 直接替换后缀 (例如 xxx.jpg -> xxx.png)
-                mask_name_v2 = image_name.replace('.jpg', '.png').replace('.jpeg', '.png')
-                mask_path_v2 = self.mask_dir / mask_name_v2
-
-                # 策略3: 兼容复杂后缀 (例如 ..._Q90.jpg__defect.jpg -> ..._Q90.png)
-                # 移除所有可能的扩展名后缀，然后加上 .png
-                base_name = image_name
-                # 反复移除可能的扩展名，直到没有为止
-                while True:
-                    stem = Path(base_name).stem
-                    if stem == base_name:
-                        break
-                    base_name = stem
-                
-                # 移除 _defect
-                base_name = base_name.replace('_defect', '')
-                # 移除可能残留的 .jpg, .png 等（虽然stem应该已经处理了，但为了保险）
-                base_name = base_name.replace('.jpg', '').replace('.jpeg', '').replace('.png', '')
-                
-                mask_name_v3 = base_name + '.png'
-                mask_path_v3 = self.mask_dir / mask_name_v3
-                
-                if mask_path_v1.exists():
-                    mask_path = mask_path_v1
-                elif mask_path_v2.exists():
-                    mask_path = mask_path_v2
-                elif mask_path_v3.exists():
-                     mask_path = mask_path_v3
-                else:
-                    # 尝试模糊匹配，因为文件名可能经过了 url 编码或者截断等处理
-                    # 只取前 20 个字符进行匹配
-                    found = False
-                    prefix = image_name[:20]
-                    for m_path in self.mask_dir.glob(f"{prefix}*.png"):
-                        mask_path = m_path
-                        found = True
-                        break
-                    
-                    if not found:
-                        print(f"Warning: Mask not found for {image_name} (tried {mask_name_v1}, {mask_name_v2}, {mask_name_v3}), skipping...")
+                # 新逻辑：直接是相对路径
+                image_path = self.image_dir / line
+                if not image_path.exists():
+                     # 尝试只用文件名匹配
+                     image_name = Path(line).name
+                     found_path = list(self.image_dir.rglob(image_name))
+                     if not found_path:
+                        print(f"Warning: Image {line} not found, skipping...")
                         continue
+                     image_path = found_path[0]
+
+            # 确定标签 (0=normal, 1=defect)
+            # 根据父文件夹判断
+            if 'normal' in image_path.parent.name.lower():
+                label = 0
             else:
+                label = 1
+            
+            # 查找 Mask (所有样本都有 Mask)
+            # 支持扁平目录结构 (masks/xxx.png) 和 镜像目录结构 (masks/parent_name/xxx.png)
+            mask_name = image_path.stem + '.png'
+            parent_name = image_path.parent.name
+            
+            # 1. 尝试扁平结构: masks/xxx.png (优先，符合当前设定)
+            mask_path_flat = self.mask_dir / mask_name
+            # 2. 尝试镜像结构: masks/defect/xxx.png (兼容)
+            mask_path_mirrored = self.mask_dir / parent_name / mask_name
+            
+            if mask_path_flat.exists():
+                mask_path = mask_path_flat
+            elif mask_path_mirrored.exists():
+                mask_path = mask_path_mirrored
+            else:
+                # 均未找到，回退到全黑 Mask (在 __getitem__ 中处理)
                 mask_path = None
             
+            # 查找 Label txt (可选，用于辅助或 future use)
+            # 同样支持扁平结构和镜像结构
+            label_txt_name = image_path.stem + '.txt'
+            
+            # 1. 尝试扁平结构: labels/xxx.txt (优先)
+            label_txt_path_flat = self.labels_dir / label_txt_name
+            # 2. 尝试镜像结构: labels/defect/xxx.txt (兼容)
+            label_txt_path_mirrored = self.labels_dir / parent_name / label_txt_name
+            
+            if label_txt_path_flat.exists():
+                label_txt_path = label_txt_path_flat
+            elif label_txt_path_mirrored.exists():
+                label_txt_path = label_txt_path_mirrored
+            else:
+                label_txt_path = None
+
             samples.append({
                 'image_path': image_path,
                 'mask_path': mask_path,
+                'label_txt_path': label_txt_path,
                 'label': label
             })
         
@@ -214,12 +215,22 @@ class DefectDataset(Dataset):
         
         # 读取掩码（如果存在）
         if sample['mask_path'] is not None:
-            mask = Image.open(sample['mask_path']).convert('L')
-            mask = np.array(mask)
-            # 二值化
-            mask = (mask > 127).astype(np.float32)
+            mask_path = sample['mask_path']
+            if str(mask_path).endswith('.txt'):
+                # 处理 YOLO 格式的 txt mask
+                mask = np.zeros((image.shape[0], image.shape[1]), dtype=np.float32)
+                # TODO: 实现 YOLO txt 转 mask 的逻辑
+                # 目前暂时作为全黑处理，或者如果你有转换逻辑可以在这里添加
+                # 通常 txt 里是 class x_center y_center width height (归一化)
+                # 或者 class x1 y1 x2 y2 ... (多边形)
+                pass
+            else:
+                mask = Image.open(mask_path).convert('L')
+                mask = np.array(mask)
+                # 二值化
+                mask = (mask > 127).astype(np.float32)
         else:
-            # 正常样本的掩码全为 0
+            # 正常样本或缺失 mask 的样本掩码全为 0
             mask = np.zeros((image.shape[0], image.shape[1]), dtype=np.float32)
         
         # 应用变换
